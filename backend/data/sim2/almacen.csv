@@ -1,0 +1,15 @@
+tipo,x,y,extra
+dimensiones,15,8,
+estanteria,6,2,
+estanteria,6,3,
+estanteria,7,2,
+estanteria,7,3,
+estanteria,8,2,
+muelle,0,4,M1
+muelle,14,3,M2
+robot,2,1,20
+robot,12,6,30
+robot,4,4,10
+base_carga,0,0,B1
+base_carga,14,7,B2
+base_carga,7,7,B3

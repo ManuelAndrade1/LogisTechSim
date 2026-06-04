@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+:root {
+  --bg-dark: #0f172a;
+  --bg-panel: #1e293b;
+  --accent-cyan: #22d3ee;
+  --accent-green: #4ade80;
+  --accent-orange: #fb923c;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --grid-line: #334155;
+  --glass-bg: rgba(30, 41, 59, 0.7);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  overflow: hidden;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--grid-line);
+  z-index: 10;
+}
+
+h1 {
+  font-weight: 800;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tick-badge {
+  background: var(--accent-cyan);
+  color: #000;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 99px;
+  font-weight: 600;
+}
+
+.controls {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn {
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border: 1px solid var(--grid-line);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: inherit;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  background: #2a3b54;
+  border-color: var(--accent-cyan);
+}
+
+.btn-active {
+  background: var(--accent-cyan);
+  color: #000;
+  border-color: var(--accent-cyan);
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+  overflow: auto;
+}
+
+.placeholder-grid {
+  border: 2px dashed var(--grid-line);
+  padding: 4rem;
+  border-radius: 12px;
+  color: var(--text-muted);
+}
+
+/* Selector de simulación */
+.sim-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--grid-line);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  color: var(--text-muted);
+  transition: border-color 0.2s;
+}
+
+.sim-selector:hover {
+  border-color: var(--accent-cyan);
+}
+
+.sim-select {
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.sim-select option {
+  background: var(--bg-panel);
+  color: var(--text-main);
+}
+
+/* Botón reiniciar */
+.btn-danger {
+  border-color: #f87171;
+  color: #f87171;
+}
+
+.btn-danger:hover {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.loading {
+  color: var(--text-muted);
+  font-size: 1rem;
+}
