@@ -163,16 +163,21 @@
 
 #### Curso normal
 
-1. El sistema identifica una base de carga disponible.
+1. El sistema identifica la base de carga más cercana. Las bases no se reservan
+   y pueden ser asignadas como destino a más de un robot.
 2. El sistema informa al robot la ruta hacia la base de carga. `<Usa: RECIBIENDO RUTA>`
 3. El robot se dirige a la base de carga.
-4. El sistema identifica la llegada a la base de carga.
-5. El sistema actualiza el estado del robot a `RECARGANDO`.
-6. En cada ciclo de recarga, el sistema incrementa el nivel de batería registrado del robot.
-7. Cuando la batería alcanza el nivel máximo, el sistema actualiza el estado del robot:
+4. Si la base está ocupada, el robot espera en su celda actual sin consumir
+   batería.
+5. El sistema identifica la llegada a la base de carga.
+6. El sistema actualiza el estado del robot a `RECARGANDO`.
+7. En cada ciclo de recarga, el sistema incrementa el nivel de batería registrado del robot.
+8. Cuando la batería alcanza el nivel máximo, el sistema actualiza el estado del robot:
    1. Si el robot tenía una orden pendiente, el sistema lo registra nuevamente como `OPERANDO`.
    2. Si el robot no tenía una orden pendiente, el sistema lo registra como `INACTIVO`.
-8. Fin del caso de uso.
+9. Un robot que termina de recargar sin orden inicia un despeje de la base
+   mientras permanece `INACTIVO`.
+10. Fin del caso de uso.
 
 ---
 
@@ -332,6 +337,8 @@
 - Un `Robot` puede tener cero o un `Muelle` reservado.
 - Una `Estantería` puede estar reservada a cero o un `Robot`.
 - Un `Robot` puede tener cero o una `Estantería` reservada.
+- Una `Base de Carga` no se reserva; su exclusión se determina únicamente por
+  ocupación física.
 - Una `Estantería` guarda cero o un `Paquete`.
 - Un `Paquete` puede estar guardado en cero o una `Estantería`.
 - Un `Robot` carga cero o un `Paquete`.
@@ -428,8 +435,9 @@
 1. Si `¿Batería suficiente?` = `NO`:
    1. `Recibir ruta a base de carga`.
    2. `Ir a base de carga`.
-   3. `Cargar batería`.
-   4. Vuelve a `Recibir Ruta`.
+   3. Si la base está ocupada, esperar sin consumir batería.
+   4. `Cargar batería`.
+   5. Vuelve a `Recibir Ruta`.
 
 ### 7.3. Rama: batería suficiente
 
@@ -552,3 +560,71 @@
 
 - `Movimiento L`
 - `A*`
+
+---
+
+## 10. Aclaraciones vinculantes de diseño y comportamiento
+
+### 10.1. Construcción del almacén
+
+- El almacén no puede existir antes de definir dimensiones, estanterías,
+  muelles y bases con sus posiciones.
+- Debe existir al menos una base de carga.
+- Las posiciones especiales no pueden superponerse.
+- Cada robot debe poseer batería inicial suficiente para alcanzar alguna base.
+
+### 10.2. Ocupación y reservas
+
+- Cada celda mantiene un atributo booleano `ocupada`.
+- La ocupación representa exclusivamente la presencia física de un robot.
+- El almacén administra la ocupación, pero no registra ni contiene robots.
+- Solo estanterías y muelles admiten reservas operativas.
+- Una reserva no vuelve intransitable una celda.
+- Las bases de carga no admiten reservas.
+
+### 10.3. Responsabilidad del robot
+
+- El robot conoce posición, batería, ruta, carga, bloqueos, estrategia y estado.
+- Recibe una ruta y ejecuta como máximo el siguiente paso.
+- Si la próxima celda está ocupada, conserva posición, ruta y batería y
+  actualiza sus bloqueos.
+- El robot actualiza su batería al moverse o recargar.
+- Puede cargar y descargar paquetes, pero no crearlos.
+- Las transiciones, fases, recargas y despejes son decididos por un controlador
+  especializado.
+
+### 10.4. Despeje
+
+- El despeje no constituye un estado adicional.
+- Un robot que despeja permanece `INACTIVO`.
+- Una nueva orden cancela el despeje y reemplaza su ruta.
+- El despeje se evalúa preventivamente contra la batería mínima necesaria para
+  llegar a una base.
+
+### 10.5. Batería preventiva
+
+- La suficiencia se calcula con distancia Manhattan.
+- El costo es `1` sin carga y `2` con carga.
+- El robot cambia a `BATERIA_BAJA` cuando su batería es igual o inferior a la
+  energía mínima requerida.
+- Esta regla aplica tanto a robots `OPERANDO` como `INACTIVO`.
+- Una ruta a carga debe asignarse antes de que el robot pierda la capacidad de
+  llegar a la base.
+- Esperar por una base ocupada no consume batería.
+- Una insuficiencia imposible de recuperar constituye un error de dominio.
+
+### 10.6. Camiones y órdenes
+
+- `GestorCamiones` se limita a acople, desacople, registro y colas FIFO.
+- El procesamiento del manifiesto y la creación de órdenes son
+  responsabilidades separadas.
+- Cada `Orden` mantiene una asociación inmutable con el `Camion` del que
+  proviene.
+
+### 10.7. Navegación
+
+- El cálculo de ruta recibe origen, destino y estrategia.
+- El resultado distingue entre estar en destino, obtener una ruta y no
+  encontrar camino.
+- Al tercer bloqueo se alterna la estrategia y se recalcula el objetivo.
+- Un camino temporalmente bloqueado se reintenta en ticks posteriores.

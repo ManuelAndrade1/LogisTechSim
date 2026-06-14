@@ -1,6 +1,9 @@
 import {
-  Almacen,
+  AlmacenBuilder,
   BaseCarga,
+  Camion,
+  ConflictoReservaError,
+  Estanteria,
   EstrategiaNavegacion,
   Muelle,
   Orden,
@@ -8,25 +11,90 @@ import {
   PaqueteGeneral,
   Robot,
 } from '../src/domain/model';
-import { RelojAlmacen } from '../src/domain/RelojAlmacen';
-import { PlanificadorRutas } from '../src/domain/navigation';
+import { AStar, CalculadorRutas, MovimientoL } from '../src/domain/navigation';
+import { RegistroRobots } from '../src/domain/registries/RegistroRobots';
 import {
-  GestorRecarga,
-  OrquestadorRobots,
+  AsignadorOrdenes,
+  ControladorRobots,
+  EjecutorRobotsPorTick,
   PriorizadorOrdenes,
 } from '../src/application/services';
+import { InicializadorSimulacion } from '../src/application/simulation/InicializadorSimulacion';
 
-describe('reglas de dominio', () => {
+const crearAlmacen = (width = 4, height = 2) => new AlmacenBuilder()
+  .conDimensiones(width, height)
+  .conEstanterias([])
+  .conMuelles([])
+  .conBasesCarga([new BaseCarga(0, height - 1, 'B1')])
+  .construir();
+
+const crearCamion = (id = 'C1', tipo: 'RECEPCION' | 'DESPACHO' = 'RECEPCION') =>
+  new Camion(id, tipo, 'M1', []);
+
+describe('construcción y entidades de dominio', () => {
+  test('el builder exige la configuración completa y al menos una base', () => {
+    expect(() => new AlmacenBuilder()
+      .conDimensiones(3, 3)
+      .conEstanterias([])
+      .conMuelles([])
+      .construir()).toThrow(/requiere dimensiones/i);
+
+    expect(() => new AlmacenBuilder()
+      .conDimensiones(3, 3)
+      .conEstanterias([])
+      .conMuelles([])
+      .conBasesCarga([])
+      .construir()).toThrow(/al menos una base/i);
+  });
+
+  test('rechaza celdas superpuestas e identificadores de recursos duplicados', () => {
+    expect(() => new AlmacenBuilder()
+      .conDimensiones(3, 3)
+      .conEstanterias([new Estanteria(1, 1)])
+      .conMuelles([new Muelle(1, 1, 'M1')])
+      .conBasesCarga([new BaseCarga(0, 0, 'B1')])
+      .construir()).toThrow(/celda especial/i);
+
+    expect(() => new AlmacenBuilder()
+      .conDimensiones(3, 3)
+      .conEstanterias([])
+      .conMuelles([])
+      .conBasesCarga([
+        new BaseCarga(0, 0, 'B1'),
+        new BaseCarga(2, 2, 'B1'),
+      ])
+      .construir()).toThrow(/Base duplicada/);
+  });
+
+  test('las bases de carga no admiten reservas', () => {
+    const almacen = crearAlmacen();
+    expect(() => almacen.reservar({ x: 0, y: 1 }, 'R1')).toThrow(/no admite reservas/);
+  });
+
+  test('la orden conserva la referencia al camión de origen', () => {
+    const camion = crearCamion();
+    const orden = new Orden('O1', camion, new PaqueteGeneral(null, 'P1', 10));
+    expect(orden.camion).toBe(camion);
+    expect(orden.camionId).toBe('C1');
+    expect(orden.tipoCamion).toBe('RECEPCION');
+  });
+
   test('prioriza comestibles por FEFO y generales por peso', () => {
+    const camion = crearCamion();
     const ordenes = [
-      new Orden('G-LIVIANO', 'C1', 'RECEPCION', new PaqueteGeneral(null, 'P1', 10)),
-      new Orden('C-TARDE', 'C1', 'RECEPCION',
-        new PaqueteComestible(null, 'P2', 5, new Date('2027-01-01'))),
-      new Orden('G-PESADO', 'C1', 'RECEPCION', new PaqueteGeneral(null, 'P3', 90)),
-      new Orden('C-TEMPRANO', 'C1', 'RECEPCION',
-        new PaqueteComestible(null, 'P4', 5, new Date('2026-01-01'))),
+      new Orden('G-LIVIANO', camion, new PaqueteGeneral(null, 'P1', 10)),
+      new Orden(
+        'C-TARDE',
+        camion,
+        new PaqueteComestible(null, 'P2', 5, new Date('2027-01-01')),
+      ),
+      new Orden('G-PESADO', camion, new PaqueteGeneral(null, 'P3', 90)),
+      new Orden(
+        'C-TEMPRANO',
+        camion,
+        new PaqueteComestible(null, 'P4', 5, new Date('2026-01-01')),
+      ),
     ];
-
     expect(new PriorizadorOrdenes().priorizar(ordenes).map(orden => orden.id)).toEqual([
       'C-TEMPRANO',
       'C-TARDE',
@@ -34,153 +102,140 @@ describe('reglas de dominio', () => {
       'G-LIVIANO',
     ]);
   });
+});
 
-  test('el robot mueve una celda, consume batería y reinicia los bloqueos', () => {
+describe('ocupación, movimiento y navegación', () => {
+  test('mueve ocupación atómicamente, consume batería y no consume al bloquearse', () => {
+    const almacen = crearAlmacen();
+    const registro = new RegistroRobots(almacen);
     const robot = new Robot('R1', 0, 0, 10);
-    robot.registrarBloqueo();
-    robot.registrarBloqueo();
-    robot.asignarRuta([{ x: 1, y: 0 }]);
+    const bloqueador = new Robot('R2', 2, 0, 10);
+    registro.registrar(robot);
+    registro.registrar(bloqueador);
 
-    const resultado = robot.ejecutarTick({ puedeOcupar: () => true });
-
-    expect(resultado.tipo).toBe('MOVIMIENTO_REALIZADO');
+    robot.registrarBloqueo();
+    robot.asignarRuta([{ x: 1, y: 0 }, { x: 2, y: 0 }]);
+    expect(robot.ejecutarSiguienteMovimiento({
+      intentarMover: (desde, hasta) => almacen.moverOcupacion(desde, hasta),
+    }).tipo).toBe('MOVIMIENTO_REALIZADO');
     expect(robot.getPosicion()).toEqual({ x: 1, y: 0 });
     expect(robot.getBateria()).toBe(9);
     expect(robot.getBloqueos()).toBe(0);
+    expect(almacen.estaOcupada({ x: 0, y: 0 })).toBe(false);
+    expect(almacen.estaOcupada({ x: 1, y: 0 })).toBe(true);
+
+    expect(robot.ejecutarSiguienteMovimiento({
+      intentarMover: (desde, hasta) => almacen.moverOcupacion(desde, hasta),
+    }).tipo).toBe('MOVIMIENTO_BLOQUEADO');
+    expect(robot.getBateria()).toBe(9);
   });
 
-  test('el reloj notifica por id y el primer robot ocupa la celda disputada', () => {
-    const almacen = new Almacen(3, 1);
+  test('consume dos unidades al moverse con carga', () => {
+    const almacen = crearAlmacen();
+    const registro = new RegistroRobots(almacen);
+    const robot = new Robot('R1', 0, 0, 10);
+    registro.registrar(robot);
+    robot.cargar(new PaqueteGeneral('P1', 'P1', 1));
+    robot.asignarRuta([{ x: 1, y: 0 }]);
+    robot.ejecutarSiguienteMovimiento({
+      intentarMover: (desde, hasta) => almacen.moverOcupacion(desde, hasta),
+    });
+    expect(robot.getBateria()).toBe(8);
+  });
+
+  test('el ejecutor procesa por id y evita la superposición', () => {
+    const almacen = crearAlmacen(3, 2);
+    const registro = new RegistroRobots(almacen);
     const r2 = new Robot('R2', 2, 0, 10);
     const r1 = new Robot('R1', 0, 0, 10);
-    almacen.agregarRobot(r2);
-    almacen.agregarRobot(r1);
+    registro.registrar(r2);
+    registro.registrar(r1);
     r1.asignarRuta([{ x: 1, y: 0 }]);
     r2.asignarRuta([{ x: 1, y: 0 }]);
+    const controlador = new ControladorRobots(registro);
 
-    const reloj = new RelojAlmacen();
-    reloj.registrar(r2);
-    reloj.registrar(r1);
-    const resultados = reloj.notificar({
-      puedeOcupar: (posicion, robotId) => !almacen.estaOcupada(posicion, robotId),
-    });
-
+    const resultados = new EjecutorRobotsPorTick(almacen, controlador).ejecutar();
     expect(resultados.map(resultado => [resultado.robot.id, resultado.tipo])).toEqual([
       ['R1', 'MOVIMIENTO_REALIZADO'],
       ['R2', 'MOVIMIENTO_BLOQUEADO'],
     ]);
-    expect(r1.getPosicion()).toEqual({ x: 1, y: 0 });
-    expect(r2.getPosicion()).toEqual({ x: 2, y: 0 });
   });
 
-  test('al tercer bloqueo el orquestador cambia la estrategia y reinicia el contador', () => {
-    const almacen = new Almacen(2, 1);
-    const robot = new Robot('R1', 0, 0, 10);
-    almacen.agregarRobot(robot);
-    const orquestador = new OrquestadorRobots(
+  test('distingue estar en destino, una ruta y la ausencia de camino', () => {
+    const almacen = crearAlmacen(3, 3);
+    expect(new MovimientoL().calcular(
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
       almacen,
-      new PlanificadorRutas(),
-      new GestorRecarga(almacen),
-    );
+    )).toEqual({ tipo: 'EN_DESTINO' });
+    expect(new CalculadorRutas().calcular(
+      EstrategiaNavegacion.MOVIMIENTO_L,
+      { x: 0, y: 0 },
+      { x: 2, y: 1 },
+      almacen,
+    )).toMatchObject({ tipo: 'RUTA' });
+
+    almacen.ocupar({ x: 1, y: 0 });
+    almacen.ocupar({ x: 1, y: 1 });
+    almacen.ocupar({ x: 1, y: 2 });
+    expect(new AStar().calcular(
+      { x: 0, y: 1 },
+      { x: 2, y: 1 },
+      almacen,
+    )).toEqual({ tipo: 'SIN_CAMINO' });
+  });
+
+  test('al tercer bloqueo el orquestador cambia la estrategia', () => {
+    const contexto = new InicializadorSimulacion().inicializar({
+      dimensiones: { width: 3, height: 2 },
+      estanterias: [],
+      muelles: [],
+      basesCarga: [{ x: 0, y: 1, id: 'B1' }],
+    }, [{ id: 'R1', x: 0, y: 0, bateria: 10 }]);
+    const robot = contexto.robots.get('R1');
     const bloqueo = {
       tipo: 'MOVIMIENTO_BLOQUEADO' as const,
       robot,
       destino: { x: 1, y: 0 },
     };
 
-    orquestador.procesarResultados([bloqueo]);
-    orquestador.procesarResultados([bloqueo]);
-    expect(robot.getBloqueos()).toBe(2);
-    orquestador.procesarResultados([bloqueo]);
-
+    contexto.orquestadorRobots.procesarResultados([bloqueo, bloqueo, bloqueo]);
     expect(robot.getEstrategia()).toBe(EstrategiaNavegacion.A_STAR);
     expect(robot.getBloqueos()).toBe(0);
   });
+});
 
-  test('una nueva orden interrumpe y reemplaza una ruta de despeje', () => {
-    const robot = new Robot('R1', 0, 0, 10);
-    const ordenCompletada = new Orden(
-      'O1',
-      'C1',
-      'RECEPCION',
-      new PaqueteGeneral(null, 'P1', 10),
-    );
-    robot.asignarOrden(ordenCompletada);
-    robot.completarOrden();
-    robot.iniciarDespeje({ x: 1, y: 0 }, [{ x: 1, y: 0 }]);
+describe('coordinación transaccional', () => {
+  test('revierte la primera reserva si la segunda entra en conflicto', () => {
+    const almacen = new AlmacenBuilder()
+      .conDimensiones(4, 2)
+      .conEstanterias([new Estanteria(3, 0)])
+      .conMuelles([new Muelle(0, 0, 'M1')])
+      .conBasesCarga([new BaseCarga(0, 1, 'B1')])
+      .construir();
+    const registro = new RegistroRobots(almacen);
+    const robot = new Robot('R1', 1, 0, 100);
+    registro.registrar(robot);
+    const controlador = new ControladorRobots(registro);
+    const camion = crearCamion();
+    camion.acoplar(0);
+    almacen.getMuelle('M1').acoplar(camion);
+    const orden = new Orden('O1', camion, new PaqueteGeneral(null, 'P1', 1));
+    const asignador = new AsignadorOrdenes(almacen, registro, controlador);
 
-    const nuevaOrden = new Orden(
-      'O2',
-      'C2',
-      'RECEPCION',
-      new PaqueteGeneral(null, 'P2', 10),
-    );
-    robot.asignarOrden(nuevaOrden);
+    const reservarReal = almacen.reservar.bind(almacen);
+    let invocaciones = 0;
+    jest.spyOn(almacen, 'reservar').mockImplementation((posicion, robotId) => {
+      invocaciones += 1;
+      if (invocaciones === 2) throw new ConflictoReservaError('Conflicto simulado');
+      reservarReal(posicion, robotId);
+    });
 
-    expect(robot.necesitaDespejar()).toBe(false);
-    expect(robot.getDestinoDespeje()).toBeNull();
-    expect(robot.tieneRuta()).toBe(false);
-    expect(robot.getOrden()).toBe(nuevaOrden);
-  });
+    asignador.asignar([orden]);
 
-  test('reelige el pasillo libre más cercano cuando el destino queda ocupado', () => {
-    const almacen = new Almacen(4, 1);
-    almacen.agregarMuelle(new Muelle(0, 0, 'M1'));
-    const robot = new Robot('R1', 0, 0, 10);
-    const ocupante = new Robot('R2', 3, 0, 10);
-    almacen.agregarRobot(robot);
-    almacen.agregarRobot(ocupante);
-    const orquestador = new OrquestadorRobots(
-      almacen,
-      new PlanificadorRutas(),
-      new GestorRecarga(almacen),
-    );
-    const orden = new Orden('O1', 'C1', 'RECEPCION', new PaqueteGeneral(null, 'P1', 1));
-    robot.asignarOrden(orden);
-    robot.completarOrden();
-
-    orquestador.asignarRutasPostOrden([robot]);
-    expect(robot.getDestinoDespeje()).toEqual({ x: 1, y: 0 });
-
-    ocupante.asignarRuta([{ x: 2, y: 0 }, { x: 1, y: 0 }]);
-    ocupante.ejecutarTick({ puedeOcupar: () => true });
-    ocupante.ejecutarTick({ puedeOcupar: () => true });
-    orquestador.prepararActividades();
-
-    expect(robot.getDestinoDespeje()).toEqual({ x: 2, y: 0 });
-  });
-
-  test('reintenta asignar despeje cuando inicialmente no hay pasillos libres', () => {
-    const almacen = new Almacen(3, 2);
-    almacen.agregarMuelle(new Muelle(0, 0, 'M1'));
-    almacen.agregarBase(new BaseCarga(0, 1, 'B1'));
-    const robot = new Robot('R1', 0, 0, 10);
-    const bloqueadores = [
-      new Robot('R2', 1, 0, 10),
-      new Robot('R3', 2, 0, 10),
-      new Robot('R4', 1, 1, 10),
-      new Robot('R5', 2, 1, 10),
-    ];
-    almacen.agregarRobot(robot);
-    for (const bloqueador of bloqueadores) almacen.agregarRobot(bloqueador);
-    const orquestador = new OrquestadorRobots(
-      almacen,
-      new PlanificadorRutas(),
-      new GestorRecarga(almacen),
-    );
-    const orden = new Orden('O1', 'C1', 'RECEPCION', new PaqueteGeneral(null, 'P1', 1));
-    robot.asignarOrden(orden);
-    robot.completarOrden();
-
-    orquestador.asignarRutasPostOrden([robot]);
-    expect(robot.getDestinoDespeje()).toBeNull();
-    expect(robot.necesitaDespejar()).toBe(true);
-
-    bloqueadores[2].asignarRuta([{ x: 0, y: 1 }]);
-    bloqueadores[2].ejecutarTick({ puedeOcupar: () => true });
-    orquestador.prepararActividades();
-
-    expect(robot.getDestinoDespeje()).toEqual({ x: 1, y: 1 });
-    expect(robot.tieneRuta()).toBe(true);
+    expect(almacen.getMuelle('M1').getReserva()).toBeNull();
+    expect(almacen.getEstanterias()[0].getReserva()).toBeNull();
+    expect(orden.estaAsignada()).toBe(false);
+    expect(controlador.estaDisponible(robot)).toBe(true);
   });
 });

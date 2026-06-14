@@ -1,35 +1,15 @@
-import {
-  Almacen,
-  EstrategiaNavegacion,
-  Posicion,
-  mismaPosicion,
-  posicionKey,
-} from './model';
-
-export interface EstrategiaRuta {
-  calcular(origen: Posicion, destino: Posicion, almacen: Almacen, robotId: string): Posicion[];
-}
-
-export class MovimientoL implements EstrategiaRuta {
-  public calcular(origen: Posicion, destino: Posicion): Posicion[] {
-    const ruta: Posicion[] = [];
-    let { x, y } = origen;
-
-    while (x !== destino.x) {
-      x += destino.x > x ? 1 : -1;
-      ruta.push({ x, y });
-    }
-    while (y !== destino.y) {
-      y += destino.y > y ? 1 : -1;
-      ruta.push({ x, y });
-    }
-    return ruta;
-  }
-}
+import { Almacen } from '../entities/Almacen';
+import { Posicion, mismaPosicion, posicionKey } from '../shared/Posicion';
+import { EstrategiaRuta } from './EstrategiaRuta';
+import { ResultadoCalculoRuta } from './ResultadoCalculoRuta';
 
 export class AStar implements EstrategiaRuta {
-  public calcular(origen: Posicion, destino: Posicion, almacen: Almacen, robotId: string): Posicion[] {
-    if (mismaPosicion(origen, destino)) return [];
+  public calcular(
+    origen: Posicion,
+    destino: Posicion,
+    almacen: Almacen,
+  ): ResultadoCalculoRuta {
+    if (mismaPosicion(origen, destino)) return { tipo: 'EN_DESTINO' };
 
     const abiertos = new Set<string>([posicionKey(origen)]);
     const posiciones = new Map<string, Posicion>([[posicionKey(origen), origen]]);
@@ -47,12 +27,15 @@ export class AStar implements EstrategiaRuta {
       const actual = posiciones.get(actualKey)!;
 
       if (mismaPosicion(actual, destino)) {
-        return this.reconstruir(actualKey, posicionKey(origen), anterior, posiciones);
+        return {
+          tipo: 'RUTA',
+          pasos: this.reconstruir(actualKey, posicionKey(origen), anterior, posiciones),
+        };
       }
 
       abiertos.delete(actualKey);
       for (const vecino of this.vecinos(actual, almacen)) {
-        if (almacen.estaOcupada(vecino, robotId) && !mismaPosicion(vecino, destino)) continue;
+        if (almacen.estaOcupada(vecino) && !mismaPosicion(vecino, destino)) continue;
 
         const vecinoKey = posicionKey(vecino);
         const nuevoCosto = (costo.get(actualKey) ?? Infinity) + 1;
@@ -65,7 +48,7 @@ export class AStar implements EstrategiaRuta {
       }
     }
 
-    return [];
+    return { tipo: 'SIN_CAMINO' };
   }
 
   private vecinos(posicion: Posicion, almacen: Almacen): Posicion[] {
@@ -92,28 +75,9 @@ export class AStar implements EstrategiaRuta {
     while (actualKey !== origenKey) {
       ruta.unshift({ ...posiciones.get(actualKey)! });
       const previo = anterior.get(actualKey);
-      if (!previo) return [];
+      if (!previo) throw new Error('La ruta calculada quedó incompleta');
       actualKey = previo;
     }
     return ruta;
-  }
-}
-
-export class PlanificadorRutas {
-  private readonly estrategias = new Map<EstrategiaNavegacion, EstrategiaRuta>([
-    [EstrategiaNavegacion.MOVIMIENTO_L, new MovimientoL()],
-    [EstrategiaNavegacion.A_STAR, new AStar()],
-  ]);
-
-  public calcular(
-    estrategia: EstrategiaNavegacion,
-    origen: Posicion,
-    destino: Posicion,
-    almacen: Almacen,
-    robotId: string,
-  ): Posicion[] {
-    const implementacion = this.estrategias.get(estrategia);
-    if (!implementacion) throw new Error(`Estrategia de navegación no soportada: ${estrategia}`);
-    return implementacion.calcular(origen, destino, almacen, robotId);
   }
 }

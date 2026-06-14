@@ -1,92 +1,218 @@
 # Implementación de LogisTech Sim
 
-## Arquitectura
+## 1. Arquitectura
 
-`ControladorAlmacen` es la fachada utilizada por `SimuladorEntorno` y la raíz de
-composición. Su única lógica propia es mantener el orden del tick y conectar los
-colaboradores. El estado pertenece a las entidades del dominio, no a variables
-globales ni a singletons.
+El backend se organiza en dominio, aplicación e infraestructura.
 
-Responsabilidades principales:
+- `domain/entities`: entidades con estado e invariantes propias.
+- `domain/builders`: construcción válida del agregado espacial.
+- `domain/navigation`: estrategias y resultados de cálculo de rutas.
+- `domain/registries`: registro de entidades que no pertenecen al almacén.
+- `application`: coordinación de casos de uso y políticas.
+- `application/contracts`: contratos de entrada y salida independientes de
+  infraestructura.
+- `infrastructure`: CSV, HTTP, entorno de simulación y observers externos.
 
-- `Almacen`: celdas, robots, ocupación y acceso a recursos.
-- `Robot`: movimiento, posición, batería, ruta, carga y estado propio.
-- `RelojAlmacen`: Subject interno que notifica a los robots observers por id.
-- `GestorCamiones`: acople, colas FIFO, registro diferido y retiro.
-- `OrquestadorOrdenes`: consulta órdenes pendientes elegibles.
-- `PriorizadorOrdenes`: política FEFO/peso, sin asignar ni almacenar órdenes.
-- `AsignadorOrdenes`: selección de robots y reserva atómica de origen/destino.
-- `OrquestadorRobots`: rutas, batería, bloqueos, estrategias y estados.
-- `GestorTransferencias`: validación y ejecución de cargas y descargas.
-- `GestorPaquetes`: creación física, almacenamiento y retiro.
-- `GestorRecarga`: reserva de bases y ciclos de recarga.
-- `PlanificadorRutas`: selección entre Movimiento L y A*.
+`ControladorAlmacen` conserva la API requerida por el entorno, pero funciona
+únicamente como fachada:
 
-## Secuencia del tick
+- delega la composición en `InicializadorSimulacion`;
+- delega cada tick en `ProcesadorPasoSimulacion`;
+- delega el snapshot en `MapeadorEstadoAlmacen`;
+- conserva solamente el contexto inicializado y el tick lógico.
 
-1. Registrar manifiestos de camiones acoplados en el tick anterior.
+## 2. Construcción del almacén
+
+`AlmacenBuilder` impide crear un almacén incompleto. Antes de construir deben
+haberse definido:
+
+- dimensiones;
+- estanterías;
+- muelles;
+- bases de carga.
+
+La construcción rechaza dimensiones inválidas, posiciones fuera de rango,
+celdas especiales superpuestas, identificadores duplicados y configuraciones
+sin bases de carga.
+
+Los robots no pertenecen a `Almacen`. `RegistroRobots` administra la flota y
+registra su ocupación inicial en las celdas.
+
+## 3. Responsabilidades del dominio
+
+### `Almacen` y `Celda`
+
+Cada `Celda` mantiene su ocupación física mediante un booleano. `Almacen`
+administra la topología y ofrece operaciones para:
+
+- consultar ocupación;
+- ocupar y liberar una celda;
+- mover ocupación de forma atómica;
+- reservar y liberar recursos operativos.
+
+Solo `Estanteria` y `Muelle` son reservables. `BaseCarga` no posee reserva:
+varios robots pueden recibirla como destino y la ocupación física decide cuál
+puede ingresar.
+
+### `Robot`
+
+`Robot` conserva exclusivamente:
+
+- posición;
+- batería;
+- ruta;
+- carga;
+- bloqueos;
+- estrategia de navegación;
+- estado público.
+
+El robot recibe rutas y ejecuta un único movimiento por tick. Consulta al
+almacén mediante un contexto de movimiento, conserva la ruta cuando está
+bloqueado y no consume batería si no se mueve.
+
+Un único método interno actualiza batería:
+
+- `-1` al moverse sin carga;
+- `-2` al moverse con carga;
+- `+10` por ciclo de recarga, hasta `100`.
+
+El robot puede cargar y descargar paquetes, pero no los crea ni decide estados,
+órdenes, recargas o despejes.
+
+### `Orden`
+
+`Orden` mantiene una referencia directa e inmutable al `Camion` de origen.
+Además conserva paquete, asignación, origen, destino y estado. El DTO proyecta
+el identificador y tipo del camión sin exponer la entidad.
+
+## 4. Servicios de aplicación
+
+### Simulación
+
+- `InicializadorSimulacion`: crea y conecta el grafo de objetos.
+- `ProcesadorPasoSimulacion`: define el orden del tick.
+- `MapeadorEstadoAlmacen`: transforma dominio a `EstadoAlmacenDTO`.
+- `ContextoSimulacion`: agrupa colaboradores ya inicializados.
+
+### Robots
+
+- `ControladorRobots`: única autoridad sobre transiciones, orden activa, fase,
+  recarga y despeje.
+- `EjecutorRobotsPorTick`: ejecuta robots por id y produce resultados de
+  actividad.
+- `OrquestadorRobots`: intermedia entre robot y entorno.
+- `AsignadorRutas`: entrega al robot el resultado del calculador.
+- `PoliticaBateria`: calcula la energía preventiva con Manhattan.
+- `GestorDespeje`: administra la ruta posterior sin crear un estado adicional.
+
+El despeje es una actividad de un robot `INACTIVO`. Una nueva orden lo cancela
+y reemplaza su ruta.
+
+### Camiones y órdenes
+
+- `GestorCamiones`: registra, acopla, desacopla y mantiene colas FIFO.
+- `ProcesadorManifiestos`: crea y registra órdenes un tick después del acople.
+- `RetiradorCamionesCompletos`: detecta camiones terminados.
+- `RegistroOrdenes`: mantiene las órdenes por identidad.
+- `OrquestadorOrdenes`: determina elegibilidad.
+- `PriorizadorOrdenes`: aplica FEFO y peso.
+- `AsignadorOrdenes`: selecciona recursos y realiza una asignación
+  transaccional.
+
+Los conflictos esperables de reserva omiten temporalmente la orden. Cualquier
+error estructural se propaga después de revertir reservas y asignaciones.
+
+### Paquetes y transferencias
+
+- `GestorPaquetes`: crea subtipos, materializa recepciones y retira despachos.
+- `GestorTransferencias`: valida y coordina carga y descarga entre robot,
+  orden, estantería y muelle.
+
+## 5. Navegación
+
+`CalculadorRutas` aplica Strategy sobre `MovimientoL` y `AStar`.
+
+El resultado es explícito:
+
+```typescript
+type ResultadoCalculoRuta =
+  | { tipo: 'EN_DESTINO' }
+  | { tipo: 'RUTA'; pasos: Posicion[] }
+  | { tipo: 'SIN_CAMINO' };
+```
+
+Una ruta imposible ya no se confunde con estar en destino. Los obstáculos
+dinámicos se reintentan en ticks posteriores. Al tercer bloqueo el robot cambia
+entre Movimiento L y A* y se recalcula el objetivo actual.
+
+## 6. Batería y recarga
+
+La configuración debe incluir al menos una base y cada robot debe poder
+alcanzar alguna con su batería inicial.
+
+Antes de una orden o un despeje se calcula preventivamente la energía mínima:
+
+- movimiento sin carga: costo `1`;
+- movimiento con carga: costo `2`;
+- estimación espacial: distancia Manhattan;
+- se incluye la llegada posterior desde el destino de la orden hasta una base.
+
+Cuando la batería es igual o inferior al mínimo, `ControladorRobots` cambia el
+estado a `BATERIA_BAJA`.
+
+`GestorRecarga` selecciona siempre la base más cercana, sin reservarla y sin
+calcular rutas. `AsignadorRutas` calcula el recorrido. Si la base está ocupada,
+el robot espera sin moverse ni consumir batería.
+
+Al completar la recarga:
+
+- con orden: vuelve a `OPERANDO`;
+- sin orden: vuelve a `INACTIVO` y solicita despeje de la base.
+
+Una insuficiencia no recuperable genera un error de dominio descriptivo en vez
+de dejar al robot bloqueado silenciosamente.
+
+## 7. Secuencia del tick
+
+1. Procesar manifiestos habilitados.
 2. Obtener y priorizar órdenes elegibles.
-3. Asignar órdenes y reservar recursos.
-4. Preparar rutas, desvíos a carga y despejes post-orden pendientes.
-5. Notificar a los robots mediante `RelojAlmacen`.
-6. Procesar bloqueos, transferencias y recargas informadas por los robots.
-7. Asignar rutas post-orden a los robots que completaron una descarga.
-8. Retirar camiones terminados y acoplar el siguiente de cada cola.
+3. Asignar órdenes y reservar origen/destino.
+4. Preparar órdenes, recargas y despejes.
+5. Ejecutar una actividad física por robot, ordenados por id.
+6. Procesar bloqueos y cambios de estrategia.
+7. Procesar cargas y descargas.
+8. Preparar despejes de órdenes completadas.
+9. Procesar ciclos de recarga.
+10. Retirar camiones completos y acoplar el siguiente de la cola.
 
-Asignar una orden o calcular una ruta no consume tiempo. Cada robot realiza como
-máximo una actividad física por tick: mover, cargar, descargar o recargar.
+Asignar, reservar, calcular rutas o cambiar estado no consume un tick físico.
 
-Un camión acoplado en `t` mantiene su manifiesto sin registrar durante ese ciclo.
-Sus órdenes se crean y pueden asignarse al comenzar `t+1`. La misma regla se
-aplica a los camiones que salen de una cola.
+## 8. SOLID, GRASP y patrones
 
-## Decisiones de dominio
+- **Controller:** fachada y controladores de casos de uso.
+- **Information Expert:** celda para ocupación, robot para movimiento y
+  batería, estantería para paquete y muelle para acople.
+- **Creator:** builder, fábrica de dominio, procesador de manifiestos y gestor
+  de paquetes.
+- **Pure Fabrication:** registros, gestores, orquestadores y mapeadores.
+- **Low Coupling / High Cohesion:** flota, topología, presentación, navegación,
+  recarga y logística tienen responsables separados.
+- **SRP:** el controlador dejó de construir, ejecutar y mapear por sí mismo.
+- **OCP/DIP:** navegación y priorización dependen de contratos pequeños.
+- **ISP:** contratos separados para rutas, movimiento, prioridad y observers.
+- **Strategy:** Movimiento L, A* y priorización.
+- **Builder:** construcción válida de `Almacen`.
+- **Facade:** `ControladorAlmacen`.
+- **DTO / Mapper:** aislamiento del frontend y de las fuentes externas.
+- **Observer:** se conserva solamente para notificaciones externas del entorno.
 
-- El robot ejecuta el siguiente paso de su ruta. Si la celda está ocupada,
-  conserva ruta, batería y posición, y devuelve `MOVIMIENTO_BLOQUEADO`.
-- Todo avance exitoso restablece inmediatamente `bloqueos` a cero.
-- Al tercer bloqueo, el orquestador alterna Movimiento L/A* y recalcula la ruta.
-- Los robots se notifican por id; por eso el id menor tiene precedencia ante un
-  destino disputado.
-- Al completar una orden, el robot queda `INACTIVO` y recibe una ruta hacia el
-  pasillo libre más cercano. La descarga y el movimiento ocurren en ticks distintos.
-- Los empates entre pasillos se resuelven por coordenada `x` y luego `y`.
-- El destino de despeje no se reserva. Si otro robot lo ocupa, se selecciona uno
-  nuevo; si no existe ninguno libre, se vuelve a intentar en ticks posteriores.
-- Un robot sigue disponible mientras despeja. Una nueva orden cancela y reemplaza
-  inmediatamente la ruta post-orden.
-- Las celdas especiales son transitables. Sus reservas protegen operaciones,
-  no la circulación.
-- La energía se calcula con Manhattan: costo `1` sin carga y `2` con carga,
-  incluyendo energía posterior para alcanzar una base.
-- La recarga suma `10` por tick hasta `100`. La orden y sus reservas se conservan.
-- Un paquete de recepción mantiene `id = null` hasta descargarse en una
-  estantería válida. Allí recibe el id planificado.
-- Una orden de despacho no es elegible hasta encontrar su paquete físico.
-- Las estanterías almacenan un único paquete.
+## 9. Compatibilidad
 
-## GRASP, SOLID y patrones
+Se mantienen:
 
-- **Controller:** `ControladorAlmacen` y los orquestadores por caso de uso.
-- **Information Expert:** `Robot` mueve y consume batería; `Estanteria` guarda;
-  `Muelle` acopla; cada entidad valida su estado.
-- **Creator:** `FabricaDominio` traduce DTO a entidades; `GestorPaquetes` crea
-  los subtipos de paquete.
-- **Bajo acoplamiento y alta cohesión:** priorización, asignación, navegación,
-  transferencias, recarga y camiones tienen colaboradores separados.
-- **SRP:** cada servicio representa una razón de cambio.
-- **OCP/DIP:** navegación y priorización se consumen mediante interfaces.
-- **Strategy:** Movimiento L, A* y política de priorización.
-- **Observer:** `RelojAlmacen` notifica a los robots sin conocer su actividad.
-- **Protected Variations:** DTO y snapshot aíslan infraestructura y frontend.
-
-## Aclaraciones y contradicciones resueltas
-
-- La planificación completa de camiones no llega al controlador. La notificación
-  de `SimuladorEntorno` se toma como validación de que la llegada estaba prevista.
-- El peso prioriza órdenes generales, pero no representa una capacidad máxima.
-- Una orden temporalmente inviable no impide asignar otras.
-- El despeje post-orden es proactivo: evita que un robot quede estacionado sobre
-  una estantería, muelle o base hasta que otra operación necesite ese recurso.
-- Los errores estructurales, como ids duplicados o recursos inexistentes,
-  generan excepciones descriptivas antes de dejar reservas parciales.
+- los cuatro métodos públicos de `ControladorAlmacen`;
+- el formato de `EstadoAlmacenDTO`;
+- el comportamiento síncrono del entorno;
+- el orden determinista por id;
+- las importaciones históricas mediante `domain/model.ts`,
+  `application/services.ts` e `infrastructure/dtos/index.ts`.

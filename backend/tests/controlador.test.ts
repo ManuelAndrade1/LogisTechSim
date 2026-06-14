@@ -3,11 +3,11 @@ import { ControladorAlmacen, EstadoAlmacenDTO } from '../src/application/Control
 import { CSVLoader } from '../src/infrastructure/factories/CSVLoader';
 import { CamionDTO, MapaConfigDTO, RobotConfigDTO } from '../src/infrastructure/dtos';
 
-const mapaSimple = (conBase = false): MapaConfigDTO => ({
+const mapaSimple = (): MapaConfigDTO => ({
   dimensiones: { width: 5, height: 2 },
   estanterias: [{ x: 4, y: 0 }],
   muelles: [{ x: 0, y: 0, id: 'M1' }],
-  basesCarga: conBase ? [{ x: 1, y: 1, id: 'B1' }] : [],
+  basesCarga: [{ x: 1, y: 1, id: 'B1' }],
 });
 
 const robots: RobotConfigDTO[] = [{ id: 'R1', x: 0, y: 0, bateria: 100 }];
@@ -28,6 +28,71 @@ const camionRecepcion = (id = 'C1', paqueteId = 'P1'): CamionDTO => ({
 });
 
 describe('ControladorAlmacen', () => {
+  test('rechaza robots que no pueden alcanzar ninguna base al inicializar', () => {
+    const controlador = new ControladorAlmacen();
+    expect(() => controlador.inicializar({
+      dimensiones: { width: 5, height: 1 },
+      estanterias: [],
+      muelles: [],
+      basesCarga: [{ x: 4, y: 0, id: 'B1' }],
+    }, [{ id: 'R1', x: 0, y: 0, bateria: 3 }])).toThrow(/no tiene batería inicial/);
+  });
+
+  test('un robot inactivo recarga preventivamente al alcanzar el mínimo', () => {
+    const controlador = new ControladorAlmacen();
+    controlador.inicializar({
+      dimensiones: { width: 4, height: 2 },
+      estanterias: [],
+      muelles: [],
+      basesCarga: [{ x: 3, y: 0, id: 'B1' }],
+    }, [{ id: 'R1', x: 0, y: 0, bateria: 3 }]);
+
+    controlador.procesarPaso();
+
+    expect(controlador.obtenerEstado().robots[0]).toMatchObject({
+      x: 1,
+      y: 0,
+      bateria: 2,
+      estado: 'BATERIA_BAJA',
+    });
+  });
+
+  test('dos robots comparten destino de carga y esperar no consume batería', () => {
+    const controlador = new ControladorAlmacen();
+    controlador.inicializar({
+      dimensiones: { width: 4, height: 2 },
+      estanterias: [],
+      muelles: [],
+      basesCarga: [{ x: 3, y: 0, id: 'B1' }],
+    }, [
+      { id: 'R1', x: 0, y: 0, bateria: 3 },
+      { id: 'R2', x: 3, y: 0, bateria: 0 },
+    ]);
+
+    controlador.procesarPaso();
+    controlador.procesarPaso();
+    expect(controlador.obtenerEstado().robots.find(robot => robot.id === 'R1')).toMatchObject({
+      x: 2,
+      y: 0,
+      bateria: 1,
+      estado: 'BATERIA_BAJA',
+    });
+
+    for (let i = 0; i < 8; i++) controlador.procesarPaso();
+    expect(controlador.obtenerEstado().robots.find(robot => robot.id === 'R1')).toMatchObject({
+      x: 2,
+      y: 0,
+      bateria: 1,
+    });
+
+    for (let i = 0; i < 4; i++) controlador.procesarPaso();
+    expect(controlador.obtenerEstado().robots.find(robot => robot.id === 'R1')).toMatchObject({
+      x: 3,
+      y: 0,
+      estado: 'RECARGANDO',
+    });
+  });
+
   test('registra en t+1 y separa carga, movimiento y descarga en ticks físicos', () => {
     const controlador = new ControladorAlmacen();
     controlador.inicializar(mapaSimple(), robots);
@@ -138,7 +203,7 @@ describe('ControladorAlmacen', () => {
 
   test('se desvía a recargar antes de tomar una carga que no puede transportar', () => {
     const controlador = new ControladorAlmacen();
-    controlador.inicializar(mapaSimple(true), [{ id: 'R1', x: 0, y: 0, bateria: 2 }]);
+    controlador.inicializar(mapaSimple(), [{ id: 'R1', x: 0, y: 0, bateria: 2 }]);
     controlador.onCamionLlega(camionRecepcion());
 
     controlador.procesarPaso();
@@ -160,7 +225,7 @@ describe('ControladorAlmacen', () => {
       dimensiones: { width: 5, height: 3 },
       estanterias: [{ x: 3, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 1 }],
       muelles: [{ x: 0, y: 0, id: 'M1' }],
-      basesCarga: [],
+      basesCarga: [{ x: 0, y: 2, id: 'B1' }],
     }, [
       { id: 'R1', x: 0, y: 0, bateria: 100 },
       { id: 'R2', x: 0, y: 1, bateria: 100 },
@@ -235,6 +300,9 @@ describe.each([
         });
       }
       controlador.procesarPaso();
+      const estadoTick = controlador.obtenerEstado();
+      expect(new Set(estadoTick.robots.map(robot => `${robot.x},${robot.y}`)).size)
+        .toBe(estadoTick.robots.length);
     }
 
     const estado: EstadoAlmacenDTO = controlador.obtenerEstado();

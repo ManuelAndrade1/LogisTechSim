@@ -1,5 +1,6 @@
 import {
   Almacen,
+  AlmacenBuilder,
   BaseCarga,
   Camion,
   Estanteria,
@@ -13,32 +14,30 @@ import {
   MapaConfigDTO,
   OrdenDTO,
   RobotConfigDTO,
-} from '../infrastructure/dtos';
+} from './contracts/dtos';
 
 export class FabricaDominio {
   public crearAlmacen(
     mapaConfig: MapaConfigDTO,
-    robotsConfig: readonly RobotConfigDTO[],
   ): Almacen {
-    const almacen = new Almacen(
-      mapaConfig.dimensiones.width,
-      mapaConfig.dimensiones.height,
+    return new AlmacenBuilder()
+      .conDimensiones(mapaConfig.dimensiones.width, mapaConfig.dimensiones.height)
+      .conEstanterias(mapaConfig.estanterias.map(
+        config => new Estanteria(config.x, config.y),
+      ))
+      .conMuelles(mapaConfig.muelles.map(
+        config => new Muelle(config.x, config.y, config.id),
+      ))
+      .conBasesCarga(mapaConfig.basesCarga.map(
+        config => new BaseCarga(config.x, config.y, config.id),
+      ))
+      .construir();
+  }
+
+  public crearRobots(configuraciones: readonly RobotConfigDTO[]): Robot[] {
+    return configuraciones.map(
+      config => new Robot(config.id, config.x, config.y, config.bateria),
     );
-
-    for (const config of mapaConfig.estanterias) {
-      almacen.agregarEstanteria(new Estanteria(config.x, config.y));
-    }
-    for (const config of mapaConfig.muelles) {
-      almacen.agregarMuelle(new Muelle(config.x, config.y, config.id));
-    }
-    for (const config of mapaConfig.basesCarga) {
-      almacen.agregarBase(new BaseCarga(config.x, config.y, config.id));
-    }
-    for (const config of robotsConfig) {
-      almacen.agregarRobot(new Robot(config.id, config.x, config.y, config.bateria));
-    }
-
-    return almacen;
   }
 
   public crearCamion(dto: CamionDTO): Camion {
