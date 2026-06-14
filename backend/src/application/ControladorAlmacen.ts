@@ -1,81 +1,220 @@
+import { Almacen, Camion, ContextoTickRobot } from '../domain/model';
+import { PlanificadorRutas } from '../domain/navigation';
+import { RelojAlmacen } from '../domain/RelojAlmacen';
 import { CamionDTO, MapaConfigDTO, RobotConfigDTO } from '../infrastructure/dtos';
+import { FabricaDominio } from './FabricaDominio';
+import {
+  AsignadorOrdenes,
+  GestorCamiones,
+  GestorPaquetes,
+  GestorRecarga,
+  GestorTransferencias,
+  OrquestadorOrdenes,
+  OrquestadorRobots,
+  PriorizadorOrdenes,
+} from './services';
+
+export interface EstadoAlmacenDTO {
+  dimensiones: { width: number; height: number };
+  robots: Array<{
+    id: string;
+    x: number;
+    y: number;
+    estado: string;
+    carga: boolean;
+    bateria: number;
+    ordenId: string | null;
+    paqueteId: string | null;
+  }>;
+  ordenes: Array<{
+    id: string;
+    camionId: string;
+    tipoCamion: 'RECEPCION' | 'DESPACHO';
+    estado: 'PENDIENTE' | 'COMPLETADA';
+    robotId: string | null;
+    paqueteId: string;
+    tipoPaquete: 'COMESTIBLE' | 'GENERAL';
+    peso: number;
+    vencimiento: string | null;
+  }>;
+  camiones: Array<{
+    x: number;
+    y: number;
+    tipo: 'RECEPCION' | 'DESPACHO';
+  }>;
+  estanterias: Array<{
+    x: number;
+    y: number;
+    paquetes: Array<{
+      id: string | null;
+      tipo: string;
+      peso: number;
+      vencimiento: string | null;
+    }>;
+  }>;
+  basesCarga: Array<{ x: number; y: number }>;
+}
 
 /**
- * Controlador del Almacén.
- *
- * Es el sistema central del almacén. El SimuladorEntorno ya está implementado
- * y se comunicará con esta clase a través de los métodos públicos definidos abajo.
- *
- * Tu tarea es implementar la lógica interna: diseñar las entidades de dominio
- * (Robot, Almacen, Camion, Orden, etc.) y conectarlas aquí.
+ * Fachada y raíz de composición del dominio del almacén.
+ * Mantiene el orden del caso de uso por tick y delega cada decisión especializada.
  */
 export class ControladorAlmacen {
+  private tickActual = 0;
+  private almacen: Almacen | null = null;
+  private reloj: RelojAlmacen | null = null;
+  private fabrica: FabricaDominio = new FabricaDominio();
+  private gestorCamiones: GestorCamiones | null = null;
+  private orquestadorOrdenes: OrquestadorOrdenes | null = null;
+  private asignadorOrdenes: AsignadorOrdenes | null = null;
+  private orquestadorRobots: OrquestadorRobots | null = null;
+  private gestorTransferencias: GestorTransferencias | null = null;
+  private gestorRecarga: GestorRecarga | null = null;
 
-  /**
-   * Llamado una vez al inicio de la simulación.
-   * Recibe la configuración del mapa (estanterías, muelles, bases de carga)
-   * y la lista de robots con su posición y batería inicial.
-   * Usá estos datos para construir tu modelo interno del almacén.
-   */
   public inicializar(mapaConfig: MapaConfigDTO, robotsConfig: RobotConfigDTO[]): void {
-    // TODO
+    const almacen = this.fabrica.crearAlmacen(mapaConfig, robotsConfig);
+    const reloj = new RelojAlmacen();
+    const gestorPaquetes = new GestorPaquetes();
+    const gestorCamiones = new GestorCamiones(almacen, gestorPaquetes);
+    const gestorRecarga = new GestorRecarga(almacen);
+
+    for (const robot of almacen.getRobots()) reloj.registrar(robot);
+
+    this.tickActual = 0;
+    this.almacen = almacen;
+    this.reloj = reloj;
+    this.gestorCamiones = gestorCamiones;
+    this.orquestadorOrdenes = new OrquestadorOrdenes(
+      almacen,
+      gestorCamiones,
+      new PriorizadorOrdenes(),
+    );
+    this.asignadorOrdenes = new AsignadorOrdenes(almacen);
+    this.orquestadorRobots = new OrquestadorRobots(
+      almacen,
+      new PlanificadorRutas(),
+      gestorRecarga,
+    );
+    this.gestorTransferencias = new GestorTransferencias(
+      almacen,
+      gestorCamiones,
+      gestorPaquetes,
+    );
+    this.gestorRecarga = gestorRecarga;
   }
 
-  /**
-   * Método ejecutado por el simulador en cada paso de tiempo (un tick).
-   * Aquí debés coordinar el movimiento de los robots, la asignación de nuevas
-   * órdenes y la liberación de camiones que hayan completado sus tareas.
-   * 
-   * Nota: Tener este método de forma pública y síncrona te facilitará enormemente
-   * la escritura de pruebas unitarias (tests síncronos) sin depender de timers reales.
-   */
   public procesarPaso(): void {
-    // TODO
+    const contexto = this.obtenerContexto();
+    this.tickActual += 1;
+
+    contexto.gestorCamiones.registrarManifiestosHabilitados(this.tickActual);
+    const ordenes = contexto.orquestadorOrdenes.obtenerPendientesPriorizadas();
+    contexto.asignadorOrdenes.asignar(ordenes);
+    contexto.orquestadorRobots.prepararActividades();
+
+    const contextoRobot: ContextoTickRobot = {
+      puedeOcupar: (posicion, robotId) =>
+        contexto.almacen.estaDentro(posicion)
+        && !contexto.almacen.estaOcupada(posicion, robotId),
+    };
+    const resultados = contexto.reloj.notificar(contextoRobot);
+
+    contexto.orquestadorRobots.procesarResultados(resultados);
+    const robotsCompletados = contexto.gestorTransferencias.procesar(resultados);
+    contexto.orquestadorRobots.asignarRutasPostOrden(robotsCompletados);
+    contexto.gestorRecarga.procesar(resultados);
+    contexto.gestorCamiones.retirarCompletados(this.tickActual);
   }
 
-  /**
-   * Notificación del entorno: un camión físico llegó a un muelle.
-   * El DTO contiene el id del camión, el tipo (RECEPCION o DESPACHO),
-   * el muelle al que llegó, y la lista de órdenes que trae.
-   *
-   * Registrá el camión y sus órdenes en tu sistema para que los robots
-   * puedan procesarlas.
-   */
   public onCamionLlega(camionDTO: CamionDTO): void {
-    // TODO
+    const contexto = this.obtenerContexto();
+    const camion: Camion = this.fabrica.crearCamion(camionDTO);
+
+    // El entorno notifica antes de procesar el tick de llegada.
+    contexto.gestorCamiones.recibir(camion, this.tickActual + 1);
   }
 
-  /**
-   * Devuelve un snapshot del estado actual del almacén para la UI.
-   * Para que la visualización del frontend funcione correctamente, debe retornar
-   * un objeto con la siguiente estructura:
-   * 
-   * {
-   *   dimensiones: { width: number; height: number };
-   *   robots: Array<{
-   *     x: number;
-   *     y: number;
-   *     estado: string;  // Ej: 'INACTIVO', 'MOVIMIENTO', 'CARGANDO' (insensible a mayúsculas/minúsculas)
-   *     carga: boolean;   // true si transporta un paquete
-   *   }>;
-   *   camiones: Array<{
-   *     x: number;
-   *     y: number;
-   *     tipo: 'RECEPCION' | 'DESPACHO';
-   *   }>;
-   *   estanterias: Array<{
-   *     x: number;
-   *     y: number;
-   *     paquetes: Array<any>; // si contiene elementos se dibuja como ocupado con un paquete
-   *   }>;
-   *   basesCarga?: Array<{
-   *     x: number;
-   *     y: number;
-   *   }>;
-   * }
-   */
-  public obtenerEstado(): object {
-    // TODO
-    return {};
+  public obtenerEstado(): EstadoAlmacenDTO {
+    const { almacen, orquestadorOrdenes } = this.obtenerContexto();
+    return {
+      dimensiones: { width: almacen.width, height: almacen.height },
+      robots: almacen.getRobots().map(robot => ({
+        id: robot.id,
+        ...robot.getPosicion(),
+        estado: robot.getEstado(),
+        carga: robot.getCarga() !== null,
+        bateria: robot.getBateria(),
+        ordenId: robot.getOrden()?.id ?? null,
+        paqueteId: robot.getCarga()?.idPlanificado ?? null,
+      })),
+      ordenes: orquestadorOrdenes.obtenerTodasPriorizadas().map(orden => {
+        const paquete = orden.getPaquete();
+        return {
+          id: orden.id,
+          camionId: orden.camionId,
+          tipoCamion: orden.tipoCamion,
+          estado: orden.getEstado(),
+          robotId: orden.getRobotId(),
+          paqueteId: paquete.idPlanificado,
+          tipoPaquete: paquete.tipo,
+          peso: paquete.peso,
+          vencimiento: paquete.getVencimiento()?.toISOString() ?? null,
+        };
+      }),
+      camiones: almacen.getMuelles().flatMap(muelle => {
+        const camion = muelle.getCamion();
+        return camion
+          ? [{ x: muelle.x, y: muelle.y, tipo: camion.tipo }]
+          : [];
+      }),
+      estanterias: almacen.getEstanterias().map(estanteria => {
+        const paquete = estanteria.getPaquete();
+        return {
+          x: estanteria.x,
+          y: estanteria.y,
+          paquetes: paquete
+            ? [{
+              id: paquete.getId(),
+              tipo: paquete.tipo,
+              peso: paquete.peso,
+              vencimiento: paquete.getVencimiento()?.toISOString() ?? null,
+            }]
+            : [],
+        };
+      }),
+      basesCarga: almacen.getBases().map(base => ({ x: base.x, y: base.y })),
+    };
+  }
+
+  private obtenerContexto(): {
+    almacen: Almacen;
+    reloj: RelojAlmacen;
+    gestorCamiones: GestorCamiones;
+    orquestadorOrdenes: OrquestadorOrdenes;
+    asignadorOrdenes: AsignadorOrdenes;
+    orquestadorRobots: OrquestadorRobots;
+    gestorTransferencias: GestorTransferencias;
+    gestorRecarga: GestorRecarga;
+  } {
+    if (!this.almacen
+      || !this.reloj
+      || !this.gestorCamiones
+      || !this.orquestadorOrdenes
+      || !this.asignadorOrdenes
+      || !this.orquestadorRobots
+      || !this.gestorTransferencias
+      || !this.gestorRecarga) {
+      throw new Error('El controlador debe inicializarse antes de utilizarse');
+    }
+    return {
+      almacen: this.almacen,
+      reloj: this.reloj,
+      gestorCamiones: this.gestorCamiones,
+      orquestadorOrdenes: this.orquestadorOrdenes,
+      asignadorOrdenes: this.asignadorOrdenes,
+      orquestadorRobots: this.orquestadorRobots,
+      gestorTransferencias: this.gestorTransferencias,
+      gestorRecarga: this.gestorRecarga,
+    };
   }
 }

@@ -409,9 +409,7 @@
 6. `Sistema`: decisión `¿Quedan órdenes?`.
    - Si `SÍ`: vuelve a `Asignar Orden`.
    - Si `NO`: continúa con la decisión `¿Muelle ocupado?`.
-7. `Camión`: decisión `¿Muelle ocupado?`.
-   - Si `SÍ`: `Desocupar Muelle` y luego `Desacoplar de Muelle`.
-   - Si `NO`: `Desacoplar de Muelle`.
+7. `Camión`: `Desacoplar muelle`
 8. Fin.
 
 ---
@@ -468,7 +466,8 @@
 1. Decisión: `¿Existe paquete?`.
    - Si `NO`: `Crear Paquete` y luego `Descargar Paquete`.
    - Si `SÍ`: `Descargar Paquete`.
-2. Fin.
+2. `Desocupar celda`.
+3. Fin.
 
 ---
 

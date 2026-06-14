@@ -1,14 +1,25 @@
 import { useEffect, useState, useRef } from 'react';
 import { Play, Pause, FastForward, RotateCcw, ChevronDown } from 'lucide-react';
 import AlmacenGrid from './components/AlmacenGrid';
+import OrdenesPanel from './components/OrdenesPanel';
+import RobotsPanel from './components/RobotsPanel';
+import { SimuladorState } from './types';
 
-interface SimuladorState {
-  tick: number;
-  robots: any[];
-  camiones: any[];
-  estanterias: any[];
-  dimensiones?: { width: number; height: number };
-}
+const normalizarEstado = (data: Partial<SimuladorState>): SimuladorState => ({
+  tick: data.tick ?? 0,
+  dimensiones: data.dimensiones ?? { width: 0, height: 0 },
+  robots: (data.robots ?? []).map((robot, index) => ({
+    ...robot,
+    id: robot.id ?? `R${index + 1}`,
+    bateria: robot.bateria ?? 0,
+    ordenId: robot.ordenId ?? null,
+    paqueteId: robot.paqueteId ?? null,
+  })),
+  ordenes: data.ordenes ?? [],
+  camiones: data.camiones ?? [],
+  estanterias: data.estanterias ?? [],
+  basesCarga: data.basesCarga ?? [],
+});
 
 function App() {
   const [estado, setEstado] = useState<SimuladorState | null>(null);
@@ -21,7 +32,7 @@ function App() {
   const fetchEstado = async () => {
     try {
       const res = await fetch('/api/estado');
-      if (res.ok) setEstado(await res.json());
+      if (res.ok) setEstado(normalizarEstado(await res.json()));
     } catch (e) {
       console.error('Error fetching estado', e);
     }
@@ -56,7 +67,7 @@ function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setEstado(data.estado);
+        setEstado(normalizarEstado(data.estado));
       }
     } catch (e) {
       console.error('Error restarting', e);
@@ -123,7 +134,13 @@ function App() {
         {!estado ? (
           <div className="loading">Cargando estado del simulador...</div>
         ) : (
-          <AlmacenGrid estado={estado} />
+          <div className="dashboard-layout">
+            <OrdenesPanel ordenes={estado.ordenes} />
+            <section className="warehouse-stage">
+              <AlmacenGrid estado={estado} />
+            </section>
+            <RobotsPanel robots={estado.robots} />
+          </div>
         )}
       </main>
     </div>

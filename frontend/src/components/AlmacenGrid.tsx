@@ -1,27 +1,27 @@
-import React from 'react';
+import { ReactNode } from 'react';
+import { SimuladorState } from '../types';
 import './AlmacenGrid.css';
 
 interface Props {
-  estado: any;
+  estado: Pick<
+    SimuladorState,
+    'dimensiones' | 'robots' | 'camiones' | 'estanterias' | 'basesCarga'
+  >;
 }
 
-const AlmacenGrid: React.FC<Props> = ({ estado }) => {
+const AlmacenGrid = ({ estado }: Props) => {
   const { dimensiones, robots, camiones, estanterias, basesCarga = [] } = estado;
-  if (!dimensiones) return null;
-
   const { width, height } = dimensiones;
 
-  // Creamos la matriz de celdas
-  const cells = [];
+  const cells: ReactNode[] = [];
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      // Buscar qué hay en esta celda
-      const robot = robots.find((r: any) => r.x === x && r.y === y);
-      const camion = camiones.find((c: any) => c.x === x && c.y === y);
-      const estante = estanterias.find((e: any) => e.x === x && e.y === y);
-      const baseCarga = basesCarga.find((b: any) => b.x === x && b.y === y);
+      const robot = robots.find(item => item.x === x && item.y === y);
+      const camion = camiones.find(item => item.x === x && item.y === y);
+      const estante = estanterias.find(item => item.x === x && item.y === y);
+      const baseCarga = basesCarga.find(item => item.x === x && item.y === y);
 
-      let content = null;
+      let content: ReactNode = null;
       let className = 'celda';
 
       if (camion) {
@@ -39,7 +39,6 @@ const AlmacenGrid: React.FC<Props> = ({ estado }) => {
         content = <div className="base-icon">⚡</div>;
       }
 
-      // El robot puede flotar sobre pasillos u otros lugares
       const robotElement = robot && (
         <div className={`robot ${robot.estado.toLowerCase()}`}>
           🤖
