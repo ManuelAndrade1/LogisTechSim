@@ -81,7 +81,12 @@
 }
 
 .robot-card {
-  border-left: 3px solid var(--accent-green);
+  background:
+    linear-gradient(90deg, var(--robot-bg), rgba(15, 23, 42, 0) 48%),
+    rgba(15, 23, 42, 0.72);
+  border-color: rgba(51, 65, 85, 0.85);
+  border-left: 3px solid var(--robot-border);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015), 0 0 18px rgba(0, 0, 0, 0.14);
 }
 
 .card-heading {
@@ -94,6 +99,22 @@
 
 .card-heading strong {
   font-size: 0.9rem;
+}
+
+.robot-card-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.robot-color-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--robot-color);
+  box-shadow: 0 0 9px var(--robot-glow);
 }
 
 .status-badge,

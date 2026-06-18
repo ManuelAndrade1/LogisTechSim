@@ -1,5 +1,6 @@
 import { Battery, Bot, ClipboardCheck, Package } from 'lucide-react';
 import { RobotState } from '../types';
+import { getRobotVisualIdentity } from '../utils/robotVisualIdentity';
 import './SidePanels.css';
 
 interface Props {
@@ -27,9 +28,16 @@ const RobotsPanel = ({ robots }: Props) => (
 
     <div className="panel-list">
       {robots.map(robot => (
-        <article className="data-card robot-card" key={robot.id}>
+        <article
+          className="data-card robot-card"
+          key={robot.id}
+          style={getRobotVisualIdentity(robot.id)}
+        >
           <div className="card-heading">
-            <strong>{robot.id}</strong>
+            <div className="robot-card-id">
+              <span className="robot-color-swatch" aria-hidden="true" />
+              <strong>{robot.id}</strong>
+            </div>
             <span className={`status-badge status-${claseEstado(robot.estado)}`}>
               {robot.estado.replace(/_/g, ' ')}
             </span>

@@ -1,0 +1,5 @@
+id_orden,id_camion,id_paquete,tipo_paquete,peso,vencimiento
+O1,C1,P1,GENERAL,70,
+O2,C1,P2,COMESTIBLE,15,2026-07-20
+O3,C2,P1,GENERAL,70,
+O4,C2,P2,COMESTIBLE,15,

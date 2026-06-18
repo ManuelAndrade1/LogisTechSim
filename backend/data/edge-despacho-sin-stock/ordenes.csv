@@ -1,0 +1,2 @@
+id_orden,id_camion,id_paquete,tipo_paquete,peso,vencimiento
+O1,C1,P404,GENERAL,10,

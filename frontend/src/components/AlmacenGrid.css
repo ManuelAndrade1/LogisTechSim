@@ -67,13 +67,25 @@
   font-size: 1.5rem;
   z-index: 10;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  filter: drop-shadow(0 0 8px var(--accent-cyan));
+  filter: drop-shadow(0 0 8px var(--robot-glow)) drop-shadow(0 0 2px var(--robot-color));
   display: flex;
   align-items: center;
   justify-content: center;
 }
+
+.robot::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--robot-bg);
+  border: 1px solid var(--robot-border);
+  box-shadow: 0 0 14px var(--robot-glow);
+}
+
 .robot.inactivo {
-  filter: drop-shadow(0 0 2px var(--text-muted));
+  filter: drop-shadow(0 0 4px var(--robot-glow));
   opacity: 0.7;
 }
 

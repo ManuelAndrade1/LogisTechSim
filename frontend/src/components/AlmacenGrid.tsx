@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { SimuladorState } from '../types';
+import { getRobotVisualIdentity } from '../utils/robotVisualIdentity';
 import './AlmacenGrid.css';
 
 interface Props {
@@ -40,7 +41,10 @@ const AlmacenGrid = ({ estado }: Props) => {
       }
 
       const robotElement = robot && (
-        <div className={`robot ${robot.estado.toLowerCase()}`}>
+        <div
+          className={`robot ${robot.estado.toLowerCase()}`}
+          style={getRobotVisualIdentity(robot.id)}
+        >
           🤖
           {robot.carga && <span className="robot-carga">📦</span>}
         </div>
