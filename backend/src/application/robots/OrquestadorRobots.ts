@@ -8,6 +8,7 @@ import { ControladorRobots } from './ControladorRobots';
 import { GestorDespeje } from './GestorDespeje';
 import { PoliticaBateria } from './PoliticaBateria';
 import { ResultadoActividadRobot } from './ResultadoActividadRobot';
+import { ResolutorBloqueos, ResolutorBloqueosSinAccion } from './ResolutorBloqueos';
 
 export class OrquestadorRobots {
   constructor(
@@ -17,6 +18,7 @@ export class OrquestadorRobots {
     private readonly recarga: GestorRecarga,
     private readonly bateria: PoliticaBateria,
     private readonly despeje: GestorDespeje,
+    private readonly resolutorBloqueos: ResolutorBloqueos = new ResolutorBloqueosSinAccion(),
   ) {}
 
   public prepararActividades(): void {
@@ -48,6 +50,12 @@ export class OrquestadorRobots {
       if (robot.registrarBloqueo() < 3) continue;
 
       robot.cambiarEstrategia();
+      if (robot.getEstado() !== EstadoRobot.BATERIA_BAJA
+        && this.resolutorBloqueos.resolver(robot, resultado.destino)) {
+        robot.reiniciarBloqueos();
+        continue;
+      }
+
       const contexto = this.controlador.getContexto(robot);
       if (contexto.requiereDespeje && robot.getEstado() === EstadoRobot.INACTIVO) {
         this.despeje.preparar(robot, true);

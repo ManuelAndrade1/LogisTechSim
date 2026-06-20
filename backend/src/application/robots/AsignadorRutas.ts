@@ -10,13 +10,17 @@ export class AsignadorRutas {
     private readonly calculador: CalculadorRutas,
   ) {}
 
-  public asignar(robot: Robot, destino: Posicion): ResultadoCalculoRuta {
-    const resultado = this.calculador.calcular(
+  public calcular(robot: Robot, destino: Posicion): ResultadoCalculoRuta {
+    return this.calculador.calcular(
       robot.getEstrategia(),
       robot.getPosicion(),
       destino,
       this.almacen,
     );
+  }
+
+  public asignar(robot: Robot, destino: Posicion): ResultadoCalculoRuta {
+    const resultado = this.calcular(robot, destino);
     robot.asignarRuta(resultado.tipo === 'RUTA' ? resultado.pasos : []);
     return resultado;
   }

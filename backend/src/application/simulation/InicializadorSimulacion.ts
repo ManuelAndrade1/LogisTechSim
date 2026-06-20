@@ -16,19 +16,25 @@ import { EjecutorRobotsPorTick } from '../robots/EjecutorRobotsPorTick';
 import { GestorDespeje } from '../robots/GestorDespeje';
 import { OrquestadorRobots } from '../robots/OrquestadorRobots';
 import { PoliticaBateria } from '../robots/PoliticaBateria';
+import { ResolutorCesionPuntual } from '../robots/ResolutorBloqueos';
 import { GestorTransferencias } from '../transfers/GestorTransferencias';
 import { GestorCamiones } from '../trucks/GestorCamiones';
 import { ProcesadorManifiestos } from '../trucks/ProcesadorManifiestos';
 import { RetiradorCamionesCompletos } from '../trucks/RetiradorCamionesCompletos';
 import { ContextoSimulacion } from './ContextoSimulacion';
+import { ValidadorConfiguracionSimulacion } from './ValidadorConfiguracionSimulacion';
 
 export class InicializadorSimulacion {
-  constructor(private readonly fabrica = new FabricaDominio()) {}
+  constructor(
+    private readonly fabrica = new FabricaDominio(),
+    private readonly validador = new ValidadorConfiguracionSimulacion(),
+  ) {}
 
   public inicializar(
     mapaConfig: MapaConfigDTO,
     robotsConfig: readonly RobotConfigDTO[],
   ): ContextoSimulacion {
+    this.validador.validar(mapaConfig, robotsConfig);
     const almacen = this.fabrica.crearAlmacen(mapaConfig);
     const robots = new RegistroRobots(almacen);
     for (const robot of this.fabrica.crearRobots(robotsConfig)) robots.registrar(robot);
@@ -72,6 +78,7 @@ export class InicializadorSimulacion {
       gestorRecarga,
       new PoliticaBateria(almacen),
       gestorDespeje,
+      new ResolutorCesionPuntual(almacen, asignadorRutas),
     );
 
     return {

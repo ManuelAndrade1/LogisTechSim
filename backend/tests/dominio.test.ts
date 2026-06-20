@@ -17,7 +17,9 @@ import {
   AsignadorOrdenes,
   ControladorRobots,
   EjecutorRobotsPorTick,
+  PoliticaBateria,
   PriorizadorOrdenes,
+  SelectorDestinoCesionAleatorio,
 } from '../src/application/services';
 import { InicializadorSimulacion } from '../src/application/simulation/InicializadorSimulacion';
 
@@ -202,6 +204,77 @@ describe('ocupación, movimiento y navegación', () => {
     contexto.orquestadorRobots.procesarResultados([bloqueo, bloqueo, bloqueo]);
     expect(robot.getEstrategia()).toBe(EstrategiaNavegacion.A_STAR);
     expect(robot.getBloqueos()).toBe(0);
+  });
+
+  test('al tercer bloqueo con destino ocupado asigna una cesión puntual', () => {
+    const contexto = new InicializadorSimulacion().inicializar({
+      dimensiones: { width: 4, height: 3 },
+      estanterias: [],
+      muelles: [],
+      basesCarga: [{ x: 0, y: 2, id: 'B1' }],
+    }, [
+      { id: 'R1', x: 0, y: 0, bateria: 10 },
+      { id: 'R2', x: 1, y: 0, bateria: 10 },
+    ]);
+    const robot = contexto.robots.get('R1');
+    const bloqueo = {
+      tipo: 'MOVIMIENTO_BLOQUEADO' as const,
+      robot,
+      destino: { x: 1, y: 0 },
+    };
+
+    contexto.orquestadorRobots.procesarResultados([bloqueo, bloqueo, bloqueo]);
+
+    expect(robot.getEstrategia()).toBe(EstrategiaNavegacion.A_STAR);
+    expect(robot.getBloqueos()).toBe(0);
+    expect(robot.getSiguientePaso()).not.toBeNull();
+  });
+
+  test('el selector de cesión usa un generador aleatorio inyectable', () => {
+    const almacen = crearAlmacen(4, 3);
+    const robot = new Robot('R1', 0, 0, 10);
+    const selector = new SelectorDestinoCesionAleatorio({ siguiente: () => 0.75 });
+
+    const destino = selector.seleccionar(robot, almacen.getPasillosLibres());
+
+    expect(destino?.posicion).toEqual({ x: 3, y: 0 });
+  });
+
+  test('la política de batería acepta autonomía exacta y rechaza solo más de 100', () => {
+    const almacen = crearAlmacen();
+    const camion = crearCamion();
+    const orden = new Orden('O1', camion, new PaqueteGeneral(null, 'P1', 1));
+    orden.asignar('R1', { x: 0, y: 0 }, { x: 1, y: 0 });
+    const robot = new Robot('R1', 0, 0, 100);
+    const politicaConEnergia = (energia: number) => new PoliticaBateria(almacen, {
+      estimar: () => energia,
+    });
+
+    expect(politicaConEnergia(99).debeRecargarParaOrden(robot, orden, 'HACIA_ORIGEN'))
+      .toBe(false);
+    expect(politicaConEnergia(100).debeRecargarParaOrden(robot, orden, 'HACIA_ORIGEN'))
+      .toBe(false);
+    expect(() => politicaConEnergia(101).debeRecargarParaOrden(robot, orden, 'HACIA_ORIGEN'))
+      .toThrow(/supera la autonomía máxima/);
+  });
+
+  test('la política de batería usa costo de ruta real y no Manhattan para órdenes', () => {
+    const almacen = new AlmacenBuilder()
+      .conDimensiones(5, 3)
+      .conEstanterias([new Estanteria(4, 0)])
+      .conMuelles([new Muelle(0, 0, 'M1')])
+      .conBasesCarga([new BaseCarga(0, 2, 'B1')])
+      .construir();
+    almacen.ocupar({ x: 1, y: 0 });
+    almacen.ocupar({ x: 2, y: 0 });
+    almacen.ocupar({ x: 3, y: 0 });
+    const camion = crearCamion();
+    const orden = new Orden('O1', camion, new PaqueteGeneral(null, 'P1', 1));
+    orden.asignar('R1', { x: 0, y: 0 }, { x: 4, y: 0 });
+    const robot = new Robot('R1', 0, 0, 16);
+
+    expect(new PoliticaBateria(almacen).debeRecargarParaOrden(robot, orden, 'HACIA_ORIGEN'))
+      .toBe(true);
   });
 });
 

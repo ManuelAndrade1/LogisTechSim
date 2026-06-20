@@ -28,6 +28,11 @@ const camionRecepcion = (id = 'C1', paqueteId = 'P1'): CamionDTO => ({
 });
 
 describe('ControladorAlmacen', () => {
+  test('rechaza inicializar una simulación sin robots', () => {
+    const controlador = new ControladorAlmacen();
+    expect(() => controlador.inicializar(mapaSimple(), [])).toThrow(/al menos un robot/);
+  });
+
   test('rechaza robots que no pueden alcanzar ninguna base al inicializar', () => {
     const controlador = new ControladorAlmacen();
     expect(() => controlador.inicializar({

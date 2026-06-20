@@ -3,9 +3,13 @@ import { Orden } from '../../domain/entities/Orden';
 import { Robot } from '../../domain/entities/Robot';
 import { Posicion, distanciaManhattan } from '../../domain/shared/Posicion';
 import { FaseTarea } from '../../domain/shared/tipos';
+import { EstimadorEnergiaOrden, EstimadorEnergiaRobotOrden } from './EstimadorEnergiaOrden';
 
 export class PoliticaBateria {
-  constructor(private readonly almacen: Almacen) {}
+  constructor(
+    private readonly almacen: Almacen,
+    private readonly estimadorOrden: EstimadorEnergiaRobotOrden = new EstimadorEnergiaOrden(almacen),
+  ) {}
 
   public energiaHastaBaseMasCercana(desde: Posicion): number {
     const bases = this.almacen.getBases();
@@ -19,19 +23,13 @@ export class PoliticaBateria {
 
   public debeRecargarParaOrden(robot: Robot, orden: Orden, fase: FaseTarea): boolean {
     const energia = this.energiaRestanteOrden(robot, orden, fase);
-    if (energia >= 100 && robot.getBateria() >= 100) {
+    if (energia > 100 && robot.getBateria() >= 100) {
       throw new Error(`La orden ${orden.id} supera la autonomía máxima del robot ${robot.id}`);
     }
-    return robot.getBateria() <= energia;
+    return robot.getBateria() < energia;
   }
 
   private energiaRestanteOrden(robot: Robot, orden: Orden, fase: FaseTarea): number {
-    if (fase === 'HACIA_ORIGEN') {
-      return distanciaManhattan(robot.getPosicion(), orden.getOrigen())
-        + distanciaManhattan(orden.getOrigen(), orden.getDestino()) * 2
-        + this.energiaHastaBaseMasCercana(orden.getDestino());
-    }
-    return distanciaManhattan(robot.getPosicion(), orden.getDestino()) * 2
-      + this.energiaHastaBaseMasCercana(orden.getDestino());
+    return this.estimadorOrden.estimar(robot, orden, fase);
   }
 }
