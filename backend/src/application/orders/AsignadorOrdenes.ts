@@ -4,14 +4,16 @@ import { ConflictoReservaError } from '../../domain/entities/CeldaReservable';
 import { Orden } from '../../domain/entities/Orden';
 import { Robot } from '../../domain/entities/Robot';
 import { RegistroRobots } from '../../domain/registries/RegistroRobots';
-import { Posicion, distanciaManhattan, mismaPosicion } from '../../domain/shared/Posicion';
+import { Posicion, mismaPosicion } from '../../domain/shared/Posicion';
 import { ControladorRobots } from '../robots/ControladorRobots';
+import { EstimadorCostoRuta, EstimadorCostoRutaAStar } from '../robots/EstimadorCostoRuta';
 
 export class AsignadorOrdenes {
   constructor(
     private readonly almacen: Almacen,
     private readonly robots: RegistroRobots,
     private readonly controladorRobots: ControladorRobots,
+    private readonly estimadorCosto: EstimadorCostoRuta = new EstimadorCostoRutaAStar(),
   ) {}
 
   public asignar(ordenes: readonly Orden[]): void {
@@ -60,11 +62,15 @@ export class AsignadorOrdenes {
       if (!muelle.estaDisponiblePara()) return null;
       const estanteria = this.almacen.getEstanterias()
         .filter(candidata => candidata.estaVacia() && candidata.estaDisponiblePara())
+        .map(candidata => ({
+          estanteria: candidata,
+          costo: this.estimarCosto(muelle.posicion, candidata.posicion),
+        }))
+        .filter(candidata => Number.isFinite(candidata.costo))
         .sort((a, b) =>
-          distanciaManhattan(muelle.posicion, a.posicion)
-          - distanciaManhattan(muelle.posicion, b.posicion)
-          || a.x - b.x
-          || a.y - b.y)[0];
+          a.costo - b.costo
+          || a.estanteria.x - b.estanteria.x
+          || a.estanteria.y - b.estanteria.y)[0]?.estanteria;
       return estanteria ? { origen: muelle.posicion, destino: estanteria.posicion } : null;
     }
 
@@ -90,9 +96,17 @@ export class AsignadorOrdenes {
     const bloqueandoDestino = disponibles.find(robot =>
       mismaPosicion(robot.getPosicion(), destino));
     if (bloqueandoDestino) return bloqueandoDestino;
-    return disponibles.sort((a, b) =>
-      distanciaManhattan(a.getPosicion(), origen)
-      - distanciaManhattan(b.getPosicion(), origen)
-      || a.id.localeCompare(b.id))[0] ?? null;
+    return disponibles
+      .map(robot => ({
+        robot,
+        costo: this.estimarCosto(robot.getPosicion(), origen),
+      }))
+      .filter(candidata => Number.isFinite(candidata.costo))
+      .sort((a, b) => a.costo - b.costo || a.robot.id.localeCompare(b.robot.id))[0]?.robot
+      ?? null;
+  }
+
+  private estimarCosto(origen: Posicion, destino: Posicion): number {
+    return this.estimadorCosto.estimarPasos(origen, destino, this.almacen);
   }
 }

@@ -1,6 +1,6 @@
 import { Almacen } from '../entities/Almacen';
 import { Posicion, mismaPosicion } from '../shared/Posicion';
-import { EstrategiaRuta } from './EstrategiaRuta';
+import { EstrategiaRuta, OpcionesCalculoRuta } from './EstrategiaRuta';
 import { ResultadoCalculoRuta } from './ResultadoCalculoRuta';
 
 export class MovimientoL implements EstrategiaRuta {
@@ -8,6 +8,7 @@ export class MovimientoL implements EstrategiaRuta {
     origen: Posicion,
     destino: Posicion,
     _almacen?: Almacen,
+    _opciones?: OpcionesCalculoRuta,
   ): ResultadoCalculoRuta {
     if (mismaPosicion(origen, destino)) return { tipo: 'EN_DESTINO' };
 

@@ -2,7 +2,7 @@ import { Almacen } from '../entities/Almacen';
 import { Posicion } from '../shared/Posicion';
 import { EstrategiaNavegacion } from '../shared/tipos';
 import { AStar } from './AStar';
-import { EstrategiaRuta } from './EstrategiaRuta';
+import { EstrategiaRuta, OpcionesCalculoRuta } from './EstrategiaRuta';
 import { MovimientoL } from './MovimientoL';
 import { ResultadoCalculoRuta } from './ResultadoCalculoRuta';
 
@@ -17,9 +17,10 @@ export class CalculadorRutas {
     origen: Posicion,
     destino: Posicion,
     almacen: Almacen,
+    opciones?: OpcionesCalculoRuta,
   ): ResultadoCalculoRuta {
     const implementacion = this.estrategias.get(estrategia);
     if (!implementacion) throw new Error(`Estrategia de navegación no soportada: ${estrategia}`);
-    return implementacion.calcular(origen, destino, almacen);
+    return implementacion.calcular(origen, destino, almacen, opciones);
   }
 }

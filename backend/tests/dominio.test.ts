@@ -15,8 +15,11 @@ import { AStar, CalculadorRutas, MovimientoL } from '../src/domain/navigation';
 import { RegistroRobots } from '../src/domain/registries/RegistroRobots';
 import {
   AsignadorOrdenes,
+  AsignadorRutas,
   ControladorRobots,
   EjecutorRobotsPorTick,
+  GestorDespeje,
+  GestorRecarga,
   PoliticaBateria,
   PriorizadorOrdenes,
   SelectorDestinoCesionAleatorio,
@@ -260,21 +263,108 @@ describe('ocupación, movimiento y navegación', () => {
 
   test('la política de batería usa costo de ruta real y no Manhattan para órdenes', () => {
     const almacen = new AlmacenBuilder()
-      .conDimensiones(5, 3)
-      .conEstanterias([new Estanteria(4, 0)])
-      .conMuelles([new Muelle(0, 0, 'M1')])
-      .conBasesCarga([new BaseCarga(0, 2, 'B1')])
+      .conDimensiones(3, 2)
+      .conEstanterias([])
+      .conMuelles([])
+      .conBasesCarga([new BaseCarga(2, 0, 'B1')])
       .construir();
     almacen.ocupar({ x: 1, y: 0 });
-    almacen.ocupar({ x: 2, y: 0 });
-    almacen.ocupar({ x: 3, y: 0 });
     const camion = crearCamion();
     const orden = new Orden('O1', camion, new PaqueteGeneral(null, 'P1', 1));
-    orden.asignar('R1', { x: 0, y: 0 }, { x: 4, y: 0 });
-    const robot = new Robot('R1', 0, 0, 16);
+    orden.asignar('R1', { x: 0, y: 0 }, { x: 0, y: 0 });
+    const robot = new Robot('R1', 0, 0, 2);
 
-    expect(new PoliticaBateria(almacen).debeRecargarParaOrden(robot, orden, 'HACIA_ORIGEN'))
+    expect(new PoliticaBateria(almacen).debeRecargarParaOrden(robot, orden, 'HACIA_DESTINO'))
       .toBe(true);
+  });
+
+  test('el gestor de recarga elige la base con menor costo efectivo', () => {
+    const almacen = new AlmacenBuilder()
+      .conDimensiones(4, 4)
+      .conEstanterias([])
+      .conMuelles([])
+      .conBasesCarga([
+        new BaseCarga(2, 0, 'B1'),
+        new BaseCarga(0, 3, 'B2'),
+      ])
+      .construir();
+    const registro = new RegistroRobots(almacen);
+    const robot = new Robot('R1', 0, 0, 10);
+    registro.registrar(robot);
+    almacen.ocupar({ x: 1, y: 0 });
+    const controlador = new ControladorRobots(registro);
+
+    const base = new GestorRecarga(almacen, controlador).asignarBase(robot);
+
+    expect(base.id).toBe('B2');
+  });
+
+  test('la inicialización valida batería inicial con costo efectivo hasta base', () => {
+    expect(() => new InicializadorSimulacion().inicializar({
+      dimensiones: { width: 3, height: 2 },
+      estanterias: [],
+      muelles: [],
+      basesCarga: [{ x: 2, y: 0, id: 'B1' }],
+    }, [
+      { id: 'R1', x: 0, y: 0, bateria: 2 },
+      { id: 'R2', x: 1, y: 0, bateria: 10 },
+    ])).toThrow(/no tiene batería inicial/);
+  });
+
+  test('el asignador de órdenes elige el robot con menor costo efectivo hacia el origen', () => {
+    const almacen = new AlmacenBuilder()
+      .conDimensiones(3, 4)
+      .conEstanterias([new Estanteria(2, 1)])
+      .conMuelles([new Muelle(0, 0, 'M1')])
+      .conBasesCarga([new BaseCarga(2, 3, 'B1')])
+      .construir();
+    const registro = new RegistroRobots(almacen);
+    const r1 = new Robot('R1', 2, 0, 10);
+    const r2 = new Robot('R2', 0, 3, 10);
+    registro.registrar(r1);
+    registro.registrar(r2);
+    almacen.ocupar({ x: 1, y: 0 });
+    const controlador = new ControladorRobots(registro);
+    const camion = crearCamion();
+    camion.acoplar(0);
+    almacen.getMuelle('M1').acoplar(camion);
+    const orden = new Orden('O1', camion, new PaqueteGeneral(null, 'P1', 1));
+
+    new AsignadorOrdenes(almacen, registro, controlador).asignar([orden]);
+
+    expect(orden.getRobotId()).toBe('R2');
+  });
+
+  test('el gestor de despeje elige el pasillo libre con menor costo efectivo', () => {
+    const almacen = new AlmacenBuilder()
+      .conDimensiones(3, 4)
+      .conEstanterias([
+        new Estanteria(0, 2),
+        new Estanteria(1, 1),
+        new Estanteria(2, 1),
+      ])
+      .conMuelles([new Muelle(0, 1, 'M1')])
+      .conBasesCarga([new BaseCarga(0, 0, 'B1')])
+      .construir();
+    const registro = new RegistroRobots(almacen);
+    const robot = new Robot('R1', 0, 0, 10);
+    registro.registrar(robot);
+    for (const posicion of [
+      { x: 1, y: 0 },
+      { x: 1, y: 2 },
+      { x: 2, y: 2 },
+      { x: 1, y: 3 },
+      { x: 2, y: 3 },
+    ]) {
+      almacen.ocupar(posicion);
+    }
+    const controlador = new ControladorRobots(registro);
+    controlador.solicitarDespeje(robot);
+    const rutas = new AsignadorRutas(almacen, new CalculadorRutas());
+
+    new GestorDespeje(almacen, controlador, rutas).preparar(robot);
+
+    expect(controlador.getContexto(robot).destinoDespeje).toEqual({ x: 0, y: 3 });
   });
 });
 

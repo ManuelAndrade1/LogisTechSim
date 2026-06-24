@@ -1,7 +1,7 @@
 import { CalculadorRutas } from '../../domain/navigation/CalculadorRutas';
+import { Almacen } from '../../domain/entities/Almacen';
 import { BaseCarga } from '../../domain/entities/BaseCarga';
 import { RegistroRobots } from '../../domain/registries/RegistroRobots';
-import { distanciaManhattan } from '../../domain/shared/Posicion';
 import { CamionDTO, MapaConfigDTO, RobotConfigDTO } from '../contracts/dtos';
 import { FabricaDominio } from '../FabricaDominio';
 import { AsignadorOrdenes } from '../orders/AsignadorOrdenes';
@@ -13,6 +13,7 @@ import { GestorRecarga } from '../recharge/GestorRecarga';
 import { AsignadorRutas } from '../robots/AsignadorRutas';
 import { ControladorRobots } from '../robots/ControladorRobots';
 import { EjecutorRobotsPorTick } from '../robots/EjecutorRobotsPorTick';
+import { EstimadorCostoRuta, EstimadorCostoRutaAStar } from '../robots/EstimadorCostoRuta';
 import { GestorDespeje } from '../robots/GestorDespeje';
 import { OrquestadorRobots } from '../robots/OrquestadorRobots';
 import { PoliticaBateria } from '../robots/PoliticaBateria';
@@ -38,7 +39,8 @@ export class InicializadorSimulacion {
     const almacen = this.fabrica.crearAlmacen(mapaConfig);
     const robots = new RegistroRobots(almacen);
     for (const robot of this.fabrica.crearRobots(robotsConfig)) robots.registrar(robot);
-    this.validarBasesAlcanzables(almacen.getBases(), robots);
+    const estimadorCosto = new EstimadorCostoRutaAStar();
+    this.validarBasesAlcanzables(almacen, almacen.getBases(), robots, estimadorCosto);
 
     const controladorRobots = new ControladorRobots(robots);
     for (const robot of robots.getTodos()) {
@@ -63,20 +65,22 @@ export class InicializadorSimulacion {
       almacen,
       robots,
       controladorRobots,
+      estimadorCosto,
     );
     const asignadorRutas = new AsignadorRutas(almacen, new CalculadorRutas());
-    const gestorRecarga = new GestorRecarga(almacen, controladorRobots);
+    const gestorRecarga = new GestorRecarga(almacen, controladorRobots, estimadorCosto);
     const gestorDespeje = new GestorDespeje(
       almacen,
       controladorRobots,
       asignadorRutas,
+      estimadorCosto,
     );
     const orquestadorRobots = new OrquestadorRobots(
       almacen,
       controladorRobots,
       asignadorRutas,
       gestorRecarga,
-      new PoliticaBateria(almacen),
+      new PoliticaBateria(almacen, undefined, estimadorCosto),
       gestorDespeje,
       new ResolutorCesionPuntual(almacen, asignadorRutas),
     );
@@ -107,14 +111,17 @@ export class InicializadorSimulacion {
   }
 
   private validarBasesAlcanzables(
+    almacen: Almacen,
     bases: readonly BaseCarga[],
     robots: RegistroRobots,
+    estimadorCosto: EstimadorCostoRuta,
   ): void {
     for (const robot of robots.getTodos()) {
-      const distancia = Math.min(
-        ...bases.map(base => distanciaManhattan(robot.getPosicion(), base.posicion)),
+      const costo = Math.min(
+        ...bases.map(base =>
+          estimadorCosto.estimarPasos(robot.getPosicion(), base.posicion, almacen)),
       );
-      if (robot.getBateria() < distancia) {
+      if (robot.getBateria() < costo) {
         throw new Error(
           `El robot ${robot.id} no tiene batería inicial para alcanzar una base de carga`,
         );

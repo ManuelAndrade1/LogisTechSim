@@ -1,25 +1,33 @@
 import { Almacen } from '../../domain/entities/Almacen';
 import { BaseCarga } from '../../domain/entities/BaseCarga';
 import { Robot } from '../../domain/entities/Robot';
-import { distanciaManhattan } from '../../domain/shared/Posicion';
 import { ControladorRobots } from '../robots/ControladorRobots';
+import { EstimadorCostoRuta, EstimadorCostoRutaAStar } from '../robots/EstimadorCostoRuta';
 import { ResultadoActividadRobot } from '../robots/ResultadoActividadRobot';
 
 export class GestorRecarga {
   constructor(
     private readonly almacen: Almacen,
     private readonly controladorRobots: ControladorRobots,
+    private readonly estimadorCosto: EstimadorCostoRuta = new EstimadorCostoRutaAStar(),
   ) {}
 
   public asignarBase(robot: Robot): BaseCarga {
     const asignada = this.controladorRobots.getContexto(robot).baseCargaId;
     if (asignada) return this.almacen.getBase(asignada);
 
-    const base = this.almacen.getBases().sort((a, b) =>
-      distanciaManhattan(robot.getPosicion(), a.posicion)
-      - distanciaManhattan(robot.getPosicion(), b.posicion)
-      || a.id.localeCompare(b.id))[0];
-    if (!base) throw new Error('No existe una base de carga para asignar');
+    const base = this.almacen.getBases()
+      .map(candidata => ({
+        base: candidata,
+        costo: this.estimadorCosto.estimarPasos(
+          robot.getPosicion(),
+          candidata.posicion,
+          this.almacen,
+        ),
+      }))
+      .filter(candidata => Number.isFinite(candidata.costo))
+      .sort((a, b) => a.costo - b.costo || a.base.id.localeCompare(b.base.id))[0]?.base;
+    if (!base) throw new Error('No existe una base de carga alcanzable para asignar');
     this.controladorRobots.iniciarDesvioARecarga(robot, base.id);
     return base;
   }

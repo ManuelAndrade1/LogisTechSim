@@ -1,6 +1,6 @@
 import { Almacen } from '../entities/Almacen';
 import { Posicion, mismaPosicion, posicionKey } from '../shared/Posicion';
-import { EstrategiaRuta } from './EstrategiaRuta';
+import { EstrategiaRuta, OpcionesCalculoRuta } from './EstrategiaRuta';
 import { ResultadoCalculoRuta } from './ResultadoCalculoRuta';
 
 export class AStar implements EstrategiaRuta {
@@ -8,6 +8,7 @@ export class AStar implements EstrategiaRuta {
     origen: Posicion,
     destino: Posicion,
     almacen: Almacen,
+    opciones: OpcionesCalculoRuta = {},
   ): ResultadoCalculoRuta {
     if (mismaPosicion(origen, destino)) return { tipo: 'EN_DESTINO' };
 
@@ -35,7 +36,11 @@ export class AStar implements EstrategiaRuta {
 
       abiertos.delete(actualKey);
       for (const vecino of this.vecinos(actual, almacen)) {
-        if (almacen.estaOcupada(vecino) && !mismaPosicion(vecino, destino)) continue;
+        if (!opciones.ignorarOcupacion
+          && almacen.estaOcupada(vecino)
+          && !mismaPosicion(vecino, destino)) {
+          continue;
+        }
 
         const vecinoKey = posicionKey(vecino);
         const nuevoCosto = (costo.get(actualKey) ?? Infinity) + 1;
