@@ -1,20 +1,24 @@
 import { Almacen } from '../../domain/entities/Almacen';
 import { Orden } from '../../domain/entities/Orden';
 import { Robot } from '../../domain/entities/Robot';
-import { Posicion, distanciaManhattan } from '../../domain/shared/Posicion';
+import { Posicion } from '../../domain/shared/Posicion';
 import { FaseTarea } from '../../domain/shared/tipos';
+import { EstimadorCostoRuta, EstimadorCostoRutaAStar } from './EstimadorCostoRuta';
 import { EstimadorEnergiaOrden, EstimadorEnergiaRobotOrden } from './EstimadorEnergiaOrden';
 
 export class PoliticaBateria {
   constructor(
     private readonly almacen: Almacen,
     private readonly estimadorOrden: EstimadorEnergiaRobotOrden = new EstimadorEnergiaOrden(almacen),
+    private readonly estimadorCosto: EstimadorCostoRuta = new EstimadorCostoRutaAStar(),
   ) {}
 
   public energiaHastaBaseMasCercana(desde: Posicion): number {
     const bases = this.almacen.getBases();
     if (bases.length === 0) throw new Error('No existen bases de carga');
-    return Math.min(...bases.map(base => distanciaManhattan(desde, base.posicion)));
+    return Math.min(
+      ...bases.map(base => this.estimadorCosto.estimarPasos(desde, base.posicion, this.almacen)),
+    );
   }
 
   public debeRecargarInactivo(robot: Robot): boolean {
