@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { SimuladorState } from '../types';
+import { crearIndiceOcupacionRobots, robotPositionKey } from '../utils/robotOccupancy';
 import { getRobotVisualIdentity } from '../utils/robotVisualIdentity';
 import './AlmacenGrid.css';
 
@@ -13,11 +14,13 @@ interface Props {
 const AlmacenGrid = ({ estado }: Props) => {
   const { dimensiones, robots, camiones, estanterias, basesCarga = [] } = estado;
   const { width, height } = dimensiones;
+  const robotsPorPosicion = crearIndiceOcupacionRobots(robots);
 
   const cells: ReactNode[] = [];
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const robot = robots.find(item => item.x === x && item.y === y);
+      const robotsEnCelda = robotsPorPosicion.get(robotPositionKey(x, y)) ?? [];
+      const robot = robotsEnCelda[0];
       const camion = camiones.find(item => item.x === x && item.y === y);
       const estante = estanterias.find(item => item.x === x && item.y === y);
       const baseCarga = basesCarga.find(item => item.x === x && item.y === y);
@@ -49,11 +52,20 @@ const AlmacenGrid = ({ estado }: Props) => {
           {robot.carga && <span className="robot-carga">📦</span>}
         </div>
       );
+      const colisionElement = robotsEnCelda.length > 1 && (
+        <div
+          className="robot-colision"
+          title={`Colisión: ${robotsEnCelda.map(item => item.id).join(', ')}`}
+        >
+          {robotsEnCelda.length}
+        </div>
+      );
 
       cells.push(
         <div key={`${x}-${y}`} className={className}>
           {content}
           {robotElement}
+          {colisionElement}
         </div>
       );
     }
